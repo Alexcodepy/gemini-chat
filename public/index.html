@@ -8,7 +8,7 @@
 </head>
 <body>
   <aside id="sidebar">
-    <button id="newChat" class="new-chat">+ Nuevo chat</button>
+    <button id="newChat" class="new-chat" data-icon="plus" data-icon-size="16"><span>Nuevo chat</span></button>
     <nav id="chatList"></nav>
     <div class="sidebar-footer">
       <span id="userEmail"></span>
@@ -18,10 +18,10 @@
 
   <main id="main">
     <header>
-      <button id="toggleSidebar" aria-label="Menú">☰</button>
+      <button id="toggleSidebar" class="icon-btn" data-icon="menu" aria-label="Menú"></button>
       <span id="modelName"></span>
       <div class="header-actions">
-        <button id="toggleSettings" aria-label="Ajustes">⚙</button>
+        <button id="toggleSettings" class="icon-btn" data-icon="settings" aria-label="Ajustes"></button>
       </div>
     </header>
 
@@ -63,10 +63,10 @@
       <form id="composer">
         <input id="fileInput" type="file" multiple hidden
                accept="image/*,audio/*,video/*,application/pdf,text/*,.md,.csv,.json">
-        <button id="attach" type="button" aria-label="Adjuntar archivo">📎</button>
+        <button id="attach" type="button" class="round-btn" data-icon="paperclip" aria-label="Adjuntar archivo"></button>
         <textarea id="input" rows="1" placeholder="Escribe un mensaje..." autocomplete="off"></textarea>
-        <button id="mic" type="button" aria-label="Dictar">🎙</button>
-        <button id="send" type="submit" aria-label="Enviar">↑</button>
+        <button id="mic" type="button" class="round-btn" data-icon="mic" aria-label="Dictar"></button>
+        <button id="send" type="submit" data-icon="send" aria-label="Enviar"></button>
       </form>
       <p class="hint status" id="status"></p>
     </div>

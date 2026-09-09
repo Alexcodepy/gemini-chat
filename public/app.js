@@ -1,5 +1,6 @@
 // public/app.js
 import { createStore } from "./store.js";
+import { icon, hydrateIcons } from "./icons.js";
 import {
   initApi, usesProxy, getApiKey, setApiKey, getModel, setModel,
   listModels, countTokens, transcribe, buildContents, stream
@@ -25,6 +26,8 @@ let messages = [];
 let pendingFiles = [];
 let modelLimits = {};
 let busy = false;
+
+hydrateIcons();
 
 const setStatus = (text = "") => { els.status.textContent = text; };
 
@@ -160,8 +163,8 @@ function renderChatList(chats) {
     const actions = document.createElement("div");
     actions.className = "chat-actions";
     actions.append(
-      iconButton("✎", "Renombrar", () => renameChat(id, title)),
-      iconButton("✕", "Eliminar", () => deleteChat(id, title))
+      iconButton("pencil", "Renombrar", () => renameChat(id, title)),
+      iconButton("trash", "Eliminar", () => deleteChat(id, title))
     );
 
     row.append(open, actions);
@@ -170,9 +173,9 @@ function renderChatList(chats) {
   markActive();
 }
 
-function iconButton(glyph, label, onClick) {
+function iconButton(name, label, onClick, size = 15) {
   const b = document.createElement("button");
-  b.textContent = glyph;
+  b.innerHTML = icon(name, size);
   b.title = label;
   b.setAttribute("aria-label", label);
   b.onclick = (e) => { e.stopPropagation(); onClick(); };
@@ -226,9 +229,19 @@ function bubbleFor(msg) {
   const b = document.createElement("div");
   b.className = "bubble";
 
-  const names = (msg.files ?? []).map((f) => `📎 ${f.name}`).join("\n");
-  if (msg.role === "user") b.textContent = [names, msg.text].filter(Boolean).join("\n");
-  else b.innerHTML = renderMarkdown(msg.text);
+  if (msg.files?.length) {
+    const list = document.createElement("div");
+    list.className = "bubble-files";
+    list.innerHTML = msg.files
+      .map((f) => `<span class="file-tag">${icon("file", 13)}${escapeHtml(f.name)}</span>`)
+      .join("");
+    b.append(list);
+  }
+
+  const body = document.createElement("div");
+  if (msg.role === "user") body.textContent = msg.text;
+  else body.innerHTML = renderMarkdown(msg.text);
+  if (msg.text) b.append(body);
 
   wrap.append(b);
   return wrap;
@@ -278,10 +291,11 @@ function renderAttachments() {
     chip.className = "chip";
     const name = document.createElement("span");
     name.textContent = f.name;
-    chip.append(name, iconButton("✕", "Quitar", () => {
+    chip.insertAdjacentHTML("afterbegin", icon("file", 14));
+    chip.append(name, iconButton("close", "Quitar", () => {
       pendingFiles.splice(i, 1);
       renderAttachments();
-    }));
+    }, 13));
     return chip;
   }));
 }
