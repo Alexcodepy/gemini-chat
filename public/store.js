@@ -1,25 +1,24 @@
 // public/store.js — persistencia de chats. Local: localStorage. Remoto: Firestore.
 import { firebaseConfig, FUNCTIONS_REGION, isLocalMode } from "./firebase-config.js";
-import { streamDirect } from "./gemini.js";
 
 const SDK = "https://www.gstatic.com/firebasejs/11.3.1";
 
 export async function createStore() {
-  return isLocalMode ? localStore(await hasProxy()) : firebaseStore();
+  return isLocalMode ? localStore() : firebaseStore();
 }
 
-// Sin proxy (GitHub Pages) la llamada sale del navegador con la key del usuario.
-async function hasProxy() {
-  try {
-    return (await fetch("/api/health", { method: "GET" })).ok;
-  } catch {
-    return false;
-  }
-}
+// Los bytes de los adjuntos no caben en localStorage: se guardan solo en memoria
+// durante la sesión y se persiste únicamente el nombre y el tipo.
+const stripFileData = (messages) =>
+  messages.map(({ role, text, files }) => ({
+    role,
+    text,
+    ...(files?.length ? { files: files.map(({ name, mimeType }) => ({ name, mimeType })) } : {})
+  }));
 
 // MARK: - Local
 
-function localStore(proxy) {
+function localStore() {
   const KEY = "gemini-chat:chats";
   const read = () => JSON.parse(localStorage.getItem(KEY) ?? "[]");
   const write = (chats) => localStorage.setItem(KEY, JSON.stringify(chats));
@@ -28,7 +27,6 @@ function localStore(proxy) {
 
   return {
     local: true,
-    proxy,
     user: { email: "local" },
     async signIn() {}, async signOut() {},
     onReady(cb) { cb(true); },
@@ -38,33 +36,26 @@ function localStore(proxy) {
       const chats = read();
       const existing = chats.find((c) => c.id === id);
       if (existing) {
-        existing.messages = messages;
+        existing.messages = stripFileData(messages);
       } else {
         id = crypto.randomUUID();
-        chats.unshift({ id, title, messages });
+        chats.unshift({ id, title, messages: stripFileData(messages) });
       }
       write(chats);
       emit();
       return id;
     },
-    async *send({ history, message }) {
-      if (!proxy) {
-        yield* streamDirect({ history, message });
-        return;
-      }
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ history, message })
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        yield decoder.decode(value, { stream: true });
-      }
+    async rename(id, title) {
+      const chats = read();
+      const chat = chats.find((c) => c.id === id);
+      if (!chat) return;
+      chat.title = title;
+      write(chats);
+      emit();
+    },
+    async remove(id) {
+      write(read().filter((c) => c.id !== id));
+      emit();
     }
   };
 }
@@ -72,18 +63,18 @@ function localStore(proxy) {
 // MARK: - Firebase
 
 async function firebaseStore() {
-  const [{ initializeApp }, authMod, fs, fn] = await Promise.all([
+  const [{ initializeApp }, authMod, fs] = await Promise.all([
     import(`${SDK}/firebase-app.js`),
     import(`${SDK}/firebase-auth.js`),
-    import(`${SDK}/firebase-firestore.js`),
-    import(`${SDK}/firebase-functions.js`)
+    import(`${SDK}/firebase-firestore.js`)
   ]);
 
   const app = initializeApp(firebaseConfig);
   const auth = authMod.getAuth(app);
   const db = fs.getFirestore(app);
-  const chatFn = fn.httpsCallable(fn.getFunctions(app, FUNCTIONS_REGION), "chat");
   let uid = null;
+
+  const chatDoc = (id) => fs.doc(db, "users", uid, "chats", id);
 
   return {
     local: false,
@@ -101,13 +92,12 @@ async function firebaseStore() {
       );
     },
     async load(id) {
-      const snap = await fs.getDoc(fs.doc(db, "users", uid, "chats", id));
-      return snap.data()?.messages ?? [];
+      return (await fs.getDoc(chatDoc(id))).data()?.messages ?? [];
     },
     async save(id, messages, title) {
-      const payload = { messages, updatedAt: fs.serverTimestamp() };
+      const payload = { messages: stripFileData(messages), updatedAt: fs.serverTimestamp() };
       if (id) {
-        await fs.updateDoc(fs.doc(db, "users", uid, "chats", id), payload);
+        await fs.updateDoc(chatDoc(id), payload);
         return id;
       }
       const ref = await fs.addDoc(fs.collection(db, "users", uid, "chats"), {
@@ -115,10 +105,7 @@ async function firebaseStore() {
       });
       return ref.id;
     },
-    async *send(payload) {
-      const { stream, data } = await chatFn.stream(payload);
-      for await (const chunk of stream) yield chunk;
-      await data;
-    }
+    rename: (id, title) => fs.updateDoc(chatDoc(id), { title }),
+    remove: (id) => fs.deleteDoc(chatDoc(id))
   };
 }

@@ -4,11 +4,12 @@ import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 
 const PORT = 5173;
-const MODEL = process.env.GEMINI_MODEL ?? "gemini-3.8-flash";
 const API_KEY = process.env.GEMINI_API_KEY;
-const SYSTEM_INSTRUCTION = "Eres un asistente conciso y directo. Responde en el idioma del usuario.";
-// El razonamiento del modelo añade ~5s antes del primer token. 0 lo desactiva, -1 lo deja dinámico.
-const THINKING_BUDGET = Number(process.env.GEMINI_THINKING_BUDGET ?? 0);
+const DEFAULT_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.8-flash";
+const BASE = "https://generativelanguage.googleapis.com/v1beta";
+const RETRY_STATUS = new Set([429, 500, 502, 503, 504]);
+const MAX_RETRIES = 4;
+const MAX_BODY = 32 * 1024 * 1024;
 
 if (!API_KEY) {
   console.error("Falta GEMINI_API_KEY. Usa: GEMINI_API_KEY=... node server.js");
@@ -23,27 +24,24 @@ const MIME = {
   ".svg": "image/svg+xml"
 };
 
-const RETRY_STATUS = new Set([429, 500, 502, 503, 504]);
-const MAX_RETRIES = 4;
-
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// El modelo devuelve 503 cuando está saturado; reintentamos con backoff exponencial.
-async function callGemini(contents) {
+async function readBody(req) {
+  const chunks = [];
+  let size = 0;
+  for await (const c of req) {
+    size += c.length;
+    if (size > MAX_BODY) throw Object.assign(new Error("Adjuntos demasiado grandes"), { status: 413 });
+    chunks.push(c);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString() || "{}");
+}
+
+// Gemini devuelve 503 cuando está saturado; reintentamos con backoff exponencial.
+async function callGoogle(path, init) {
   let last = null;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:streamGenerateContent?alt=sse&key=${API_KEY}`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          contents,
-          systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
-          generationConfig: { thinkingConfig: { thinkingBudget: THINKING_BUDGET } }
-        })
-      }
-    );
+    const res = await fetch(`${BASE}/${path}${path.includes("?") ? "&" : "?"}key=${API_KEY}`, init);
     if (res.ok) return res;
 
     last = { status: res.status, body: await res.text() };
@@ -54,37 +52,51 @@ async function callGemini(contents) {
     await sleep(delay);
   }
 
-  const message = RETRY_STATUS.has(last.status)
-    ? "El modelo está saturado ahora mismo. Vuelve a intentarlo en unos segundos."
-    : (JSON.parse(last.body)?.error?.message ?? last.body);
+  let message;
+  if (last.status === 429) {
+    message = "Has superado la cuota de la API. Espera un momento o revisa tu plan en AI Studio.";
+  } else if (RETRY_STATUS.has(last.status)) {
+    message = "El modelo está saturado ahora mismo. Vuelve a intentarlo en unos segundos.";
+  } else {
+    try { message = JSON.parse(last.body)?.error?.message ?? last.body; }
+    catch { message = last.body; }
+  }
   throw Object.assign(new Error(message), { status: last.status });
 }
 
-async function readBody(req) {
-  const chunks = [];
-  for await (const c of req) chunks.push(c);
-  return JSON.parse(Buffer.concat(chunks).toString() || "{}");
+const jsonInit = (payload) => ({
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(payload)
+});
+
+// MARK: - Endpoints
+
+async function handleModels(res) {
+  const upstream = await callGoogle("models?pageSize=200", {});
+  res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+  res.end(await upstream.text());
+}
+
+async function handleTokens(req, res) {
+  const { model = DEFAULT_MODEL, contents } = await readBody(req);
+  const upstream = await callGoogle(`models/${model}:countTokens`, jsonInit({ contents }));
+  res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+  res.end(await upstream.text());
+}
+
+async function handleTranscribe(req, res) {
+  const { model = DEFAULT_MODEL, ...body } = await readBody(req);
+  const upstream = await callGoogle(`models/${model}:generateContent`, jsonInit(body));
+  res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+  res.end(await upstream.text());
 }
 
 async function handleChat(req, res) {
-  const { history = [], message } = await readBody(req);
-  if (typeof message !== "string" || !message.trim()) {
-    res.writeHead(400).end("message required");
-    return;
-  }
+  const { model = DEFAULT_MODEL, ...body } = await readBody(req);
+  if (!body.contents?.length) throw Object.assign(new Error("contents required"), { status: 400 });
 
-  const contents = [...history, { role: "user", text: message }]
-    .filter((m) => typeof m.text === "string" && m.text.length > 0)
-    .slice(-40)
-    .map((m) => ({ role: m.role === "model" ? "model" : "user", parts: [{ text: m.text }] }));
-
-  let upstream;
-  try {
-    upstream = await callGemini(contents);
-  } catch (err) {
-    res.writeHead(err.status ?? 502, { "content-type": "text/plain; charset=utf-8" }).end(err.message);
-    return;
-  }
+  const upstream = await callGoogle(`models/${model}:streamGenerateContent?alt=sse`, jsonInit(body));
 
   res.writeHead(200, {
     "content-type": "text/plain; charset=utf-8",
@@ -128,14 +140,23 @@ async function serveStatic(req, res) {
   }
 }
 
+const ROUTES = {
+  "/api/tokens": handleTokens,
+  "/api/transcribe": handleTranscribe,
+  "/api/chat": handleChat
+};
+
 createServer(async (req, res) => {
   try {
     if (req.url === "/api/health") res.writeHead(204).end();
-    else if (req.method === "POST" && req.url === "/api/chat") await handleChat(req, res);
+    else if (req.url === "/api/models") await handleModels(res);
+    else if (req.method === "POST" && ROUTES[req.url]) await ROUTES[req.url](req, res);
     else await serveStatic(req, res);
   } catch (err) {
-    console.error(err);
-    if (!res.headersSent) res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+    console.error(err.message);
+    if (!res.headersSent) {
+      res.writeHead(err.status ?? 500, { "content-type": "text/plain; charset=utf-8" });
+    }
     res.end(err.message);
   }
-}).listen(PORT, () => console.log(`http://localhost:${PORT}  ·  ${MODEL}`));
+}).listen(PORT, () => console.log(`http://localhost:${PORT}  ·  ${DEFAULT_MODEL}`));

@@ -26,29 +26,50 @@
     </header>
 
     <div id="settingsPanel" hidden>
-      <h2>Tema</h2>
-      <div class="theme-options" id="themeOptions">
-        <button data-theme="system">Sistema</button>
-        <button data-theme="light">Claro</button>
-        <button data-theme="dark">Oscuro</button>
-      </div>
+      <section>
+        <h2>Tema</h2>
+        <div class="options" id="themeOptions">
+          <button data-theme="system">Sistema</button>
+          <button data-theme="light">Claro</button>
+          <button data-theme="dark">Oscuro</button>
+        </div>
+      </section>
 
-      <div id="apiKeySection" hidden>
+      <section>
+        <h2>Modelo</h2>
+        <select id="modelSelect"></select>
+      </section>
+
+      <section>
+        <h2>Memoria del chat</h2>
+        <div class="meter"><div id="memoryBar"></div></div>
+        <p class="hint" id="memoryText">Sin mensajes todavía.</p>
+      </section>
+
+      <section id="apiKeySection" hidden>
         <h2>API key</h2>
         <input id="apiKey" type="password" placeholder="AIza..." autocomplete="off" spellcheck="false">
         <p class="hint">
           Se guarda solo en este navegador.
           <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Consigue una</a>
         </p>
-      </div>
+      </section>
     </div>
 
     <div id="messages"></div>
 
-    <form id="composer">
-      <textarea id="input" rows="1" placeholder="Escribe un mensaje..." autocomplete="off"></textarea>
-      <button id="send" type="submit" aria-label="Enviar">↑</button>
-    </form>
+    <div id="composerWrap">
+      <div id="attachments"></div>
+      <form id="composer">
+        <input id="fileInput" type="file" multiple hidden
+               accept="image/*,audio/*,video/*,application/pdf,text/*,.md,.csv,.json">
+        <button id="attach" type="button" aria-label="Adjuntar archivo">📎</button>
+        <textarea id="input" rows="1" placeholder="Escribe un mensaje..." autocomplete="off"></textarea>
+        <button id="mic" type="button" aria-label="Dictar">🎙</button>
+        <button id="send" type="submit" aria-label="Enviar">↑</button>
+      </form>
+      <p class="hint status" id="status"></p>
+    </div>
   </main>
 
   <div id="authGate" class="gate hidden">
