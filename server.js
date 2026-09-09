@@ -130,7 +130,8 @@ async function serveStatic(req, res) {
 
 createServer(async (req, res) => {
   try {
-    if (req.method === "POST" && req.url === "/api/chat") await handleChat(req, res);
+    if (req.url === "/api/health") res.writeHead(204).end();
+    else if (req.method === "POST" && req.url === "/api/chat") await handleChat(req, res);
     else await serveStatic(req, res);
   } catch (err) {
     console.error(err);

@@ -1,15 +1,25 @@
 // public/store.js — persistencia de chats. Local: localStorage. Remoto: Firestore.
 import { firebaseConfig, FUNCTIONS_REGION, isLocalMode } from "./firebase-config.js";
+import { streamDirect } from "./gemini.js";
 
 const SDK = "https://www.gstatic.com/firebasejs/11.3.1";
 
 export async function createStore() {
-  return isLocalMode ? localStore() : firebaseStore();
+  return isLocalMode ? localStore(await hasProxy()) : firebaseStore();
+}
+
+// Sin proxy (GitHub Pages) la llamada sale del navegador con la key del usuario.
+async function hasProxy() {
+  try {
+    return (await fetch("/api/health", { method: "GET" })).ok;
+  } catch {
+    return false;
+  }
 }
 
 // MARK: - Local
 
-function localStore() {
+function localStore(proxy) {
   const KEY = "gemini-chat:chats";
   const read = () => JSON.parse(localStorage.getItem(KEY) ?? "[]");
   const write = (chats) => localStorage.setItem(KEY, JSON.stringify(chats));
@@ -18,6 +28,7 @@ function localStore() {
 
   return {
     local: true,
+    proxy,
     user: { email: "local" },
     async signIn() {}, async signOut() {},
     onReady(cb) { cb(true); },
@@ -37,6 +48,10 @@ function localStore() {
       return id;
     },
     async *send({ history, message }) {
+      if (!proxy) {
+        yield* streamDirect({ history, message });
+        return;
+      }
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },

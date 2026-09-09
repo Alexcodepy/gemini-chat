@@ -277,3 +277,22 @@ header button {
 }
 
 #main { position: relative; }
+
+#apiKeySection { display: grid; gap: 8px; }
+#apiKeySection[hidden] { display: none; }
+
+#apiKey {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+#apiKey:focus { border-color: var(--accent); }
+
+.hint { margin: 0; font-size: 11px; line-height: 1.4; color: var(--text-dim); }
+.hint a { color: var(--accent); }

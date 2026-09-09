@@ -1,13 +1,15 @@
 // public/app.js
 import { MODEL_LABEL } from "./firebase-config.js";
 import { createStore } from "./store.js";
+import { getApiKey, setApiKey } from "./gemini.js";
 
 const $ = (id) => document.getElementById(id);
 const els = {
   gate: $("authGate"), signIn: $("signIn"), signOut: $("signOut"), userEmail: $("userEmail"),
   sidebar: $("sidebar"), toggleSidebar: $("toggleSidebar"), newChat: $("newChat"), chatList: $("chatList"),
   messages: $("messages"), composer: $("composer"), input: $("input"), send: $("send"), modelName: $("modelName"),
-  toggleSettings: $("toggleSettings"), settingsPanel: $("settingsPanel"), themeOptions: $("themeOptions")
+  toggleSettings: $("toggleSettings"), settingsPanel: $("settingsPanel"), themeOptions: $("themeOptions"),
+  apiKeySection: $("apiKeySection"), apiKey: $("apiKey")
 };
 
 const store = await createStore();
@@ -43,6 +45,14 @@ function applyTheme(theme) {
 }
 
 applyTheme(localStorage.getItem(THEME_KEY) ?? "system");
+
+// El campo de key solo aparece si no hay proxy que la guarde por nosotros.
+if (store.local && !store.proxy) {
+  els.apiKeySection.hidden = false;
+  els.apiKey.value = getApiKey();
+  els.apiKey.oninput = () => setApiKey(els.apiKey.value);
+  if (!getApiKey()) els.settingsPanel.hidden = false;
+}
 
 els.themeOptions.onclick = (e) => {
   const theme = e.target.closest("button")?.dataset.theme;
